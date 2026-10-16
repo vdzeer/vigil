@@ -13,6 +13,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let defaults = UserDefaults.standard
     private let hold = AwakeHold()
     private let watchdog = LidWatchdog()
+    private lazy var lidSensor = LidSensor { [weak self] in self?.closedLidChanged() }
+    private let updates = Updates()
     /// Keeps App Nap from stretching the battery guard's timer while lid-closed mode is on.
     private var lidActivity: NSObjectProtocol?
 
@@ -66,12 +68,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         NSWorkspace.shared.notificationCenter.addObserver(
             self, selector: #selector(woke(_:)), name: NSWorkspace.didWakeNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self, selector: #selector(screensWoke(_:)), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        lidSensor.start()
     }
 
     /// While the app is not running, nothing keeps the Mac awake.
     func applicationWillTerminate(_ notification: Notification) {
         ticker?.cancel()
+        lidSensor.stop()
         hold.set(false)
+        // Quitting for an update: the new version starts in a moment and takes over, so lid-closed
+        // mode stays on; the watcher switches it off if no Vigil is running by then.
+        if updates.isRestarting { return }
         // Asks the system rather than `state`: a switch or the start-up restore may still be under way.
         if LidMode.isOn() { LidMode.set(false) }
         watchdog.stop()
@@ -88,6 +97,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         noteItem.isEnabled = false
         menu.addItem(.separator())
         loginItem = add(Strings.Menu.openAtLogin, #selector(toggleLoginItem(_:)))
+        if updates.isAvailable { add(Strings.Menu.checkForUpdates, #selector(checkForUpdates(_:))) }
         add(Strings.Menu.about, #selector(about(_:)))
         add(Strings.Menu.quit, #selector(quit(_:)), key: "q")
     }
@@ -166,6 +176,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         render()
     }
 
+    @objc private func checkForUpdates(_ sender: Any?) {
+        updates.checkNow()
+    }
+
     @objc private func about(_ sender: Any?) {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(options: [
@@ -183,6 +197,35 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func woke(_ notification: Notification) {
         tick()
+    }
+
+    /// Something lit the displays while the lid may still be closed; opening the lid does too,
+    /// and then the check below finds it open.
+    @objc private func screensWoke(_ notification: Notification) {
+        closedLidChanged(after: .seconds(2))
+    }
+
+    /// With lid-closed mode on and the lid shut, the built-in display would stay lit: turn it off
+    /// and hold only the Mac until the lid opens. Checked again a moment later, in case closing
+    /// the lid lit the display once more.
+    private func closedLidChanged(after delay: Duration = .zero) {
+        Task.detached {
+            for wait in [delay, .seconds(3)] {
+                try? await Task.sleep(for: wait)
+                let closed = LidSensor.isClosed()
+                let off = ClosedLid.displayOff(
+                    lidMode: LidMode.isOn(), lidClosed: closed, externalDisplay: Display.hasExternal())
+                await self.letDisplayRest(off, lidOpen: !closed)
+                if off { Display.sleepNow() }
+            }
+        }
+    }
+
+    private func letDisplayRest(_ rest: Bool, lidOpen: Bool) {
+        hold.setDisplayMayRest(rest)
+        state.awake = hold.isOn
+        // An update that waited for the lid goes in now.
+        if lidOpen { updates.installIfLidOpen() }
     }
 
     private func tick() {
@@ -209,6 +252,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func apply(
         _ reading: (on: Bool, ready: Bool), note: Note? = nil, keepingNote: Bool = false, finishing: Bool = false
     ) {
+        let lidSwitched = state.lid != reading.on
         state.lid = reading.on
         state.lidReady = reading.ready
         if reading.on {
@@ -226,5 +270,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !keepingNote { state.note = note }
         defaults.set(reading.on, forKey: Key.lid)
         render()
+        if lidSwitched { closedLidChanged() }
     }
 }

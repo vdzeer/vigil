@@ -9,7 +9,8 @@ keep running with its lid closed, for example while a long build or a download f
 - **Keep Mac Awake.** Click the eye in the menu bar to switch it on or off. While it is on, the
   display stays on and the Mac does not lock or sleep when idle.
 - **Keep Running with Lid Closed.** Right-click (or Control-click) the eye and choose it in the
-  menu. The Mac keeps running when you close the lid.
+  menu. The Mac keeps running when you close the lid, and its display turns off behind the lid.
+  A monitor connected at that time stays on.
 - **Battery guard.** On battery below 15%, lid-closed mode switches itself off, so a closed Mac
   cannot drain to zero. The menu says why until the next change.
 - **Nothing left behind.** Quitting Vigil, logging out or a plain `kill` releases everything:
@@ -18,6 +19,9 @@ keep running with its lid closed, for example while a long build or a download f
   the way you left them the next time Vigil starts, unless the battery is low.
 - **Open at Login**, on after the first launch, can be turned off in the menu or in System
   Settings → General → Login Items.
+- **Updates.** Vigil looks for a new version once a day, downloads it and restarts itself with
+  it, which takes a second. While the lid is closed in lid-closed mode it waits for the lid to
+  open. Check for Updates in the menu looks right away.
 
 The menu bar picture shows the state by its shape, so it stays readable on any wallpaper:
 
@@ -73,8 +77,13 @@ Keep in mind:
 
 ## Privacy
 
-Vigil makes no network connections and collects nothing. It stores its two switches in its own
-preferences (`com.vdzeer.vigil`).
+Vigil collects nothing. Its only network connection is the daily update check: it reads
+`appcast.xml` from the latest release on GitHub and, when there is a new version, downloads the
+disk image from there. No system profile is sent. An update is installed only when its EdDSA
+signature matches the key built into the app. To switch automatic updates off:
+`defaults write com.vdzeer.vigil SUAutomaticallyUpdate -bool NO`.
+
+Vigil stores its two switches in its own preferences (`com.vdzeer.vigil`).
 
 ## Build from source
 
@@ -93,16 +102,19 @@ certificates instead.
 Checks: `scripts/gates.sh` runs the formatter in lint mode, a build with warnings as errors and
 the tests.
 
+The one dependency is [Sparkle](https://sparkle-project.org) for updates, fetched by Swift
+Package Manager at the exact version in `Package.swift`.
+
 Release: `scripts/release.sh` builds with a Developer ID, makes a disk image, notarizes and
-staples it. The top of the script lists what it needs; `scripts/release.sh --check` tells you
-whether it is all in place.
+staples it, and writes `appcast.xml` signed with the update key. The top of the script lists
+what it needs; `scripts/release.sh --check` tells you whether it is all in place.
 
 ## Layout
 
 | Path | What lives there |
 | --- | --- |
 | `Sources/VigilCore` | Logic without UI: what the menu shows for each state, the sleep hold, the lid setting, the battery reading, all the words |
-| `Sources/Vigil` | The app: the menu bar item and its menu, the glyphs, the login item |
+| `Sources/Vigil` | The app: the menu bar item and its menu, the glyphs, the login item, updates |
 | `Resources` | `Info.plist` and the one-time admin script |
 | `Tests` | Unit tests for the core and checks that read the source |
 | `scripts` | Build, release and the gates |

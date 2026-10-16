@@ -6,6 +6,7 @@ public enum Strings {
         public static let keepAwake = "Keep Mac Awake"
         public static let lidClosed = "Keep Running with Lid Closed"
         public static let openAtLogin = "Open at Login"
+        public static let checkForUpdates = "Check for Updates…"
         public static let about = "About Vigil"
         public static let quit = "Quit Vigil"
     }

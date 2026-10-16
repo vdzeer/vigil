@@ -34,6 +34,15 @@ import Testing
         #expect(commands.allSatisfy { $0.hasPrefix("/") }, "\(commands)")
     }
 
+    @Test func aClosedLidTurnsTheDisplayOffOnlyWithoutAMonitor() {
+        #expect(ClosedLid.displayOff(lidMode: true, lidClosed: true, externalDisplay: false))
+        // A monitor is the screen while the lid is closed.
+        #expect(!ClosedLid.displayOff(lidMode: true, lidClosed: true, externalDisplay: true))
+        #expect(!ClosedLid.displayOff(lidMode: true, lidClosed: false, externalDisplay: false))
+        // Without lid-closed mode the Mac sleeps by itself.
+        #expect(!ClosedLid.displayOff(lidMode: false, lidClosed: true, externalDisplay: false))
+    }
+
     @Test func quotesForTheShell() {
         #expect(LidMode.shellQuoted("plain") == "'plain'")
         #expect(LidMode.shellQuoted("it's") == #"'it'\''s'"#)

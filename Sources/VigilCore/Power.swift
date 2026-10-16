@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import IOKit.ps
 import IOKit.pwr_mgt
@@ -22,28 +23,137 @@ public func run(_ tool: String, _ arguments: [String]) -> (status: Int32, output
     return (process.terminationStatus, String(data: data, encoding: .utf8) ?? "")
 }
 
-/// Keeps the display on and the Mac from idling to sleep, the way Caffeine does.
+/// Keeps the display on and the Mac from idling to sleep, the way Caffeine does. While the lid is
+/// closed in lid-closed mode it holds only the Mac, so the hidden display may go dark.
 /// macOS drops the hold by itself when the app quits.
 public final class AwakeHold {
     private var id = IOPMAssertionID(0)
     public private(set) var isOn = false
+    public private(set) var displayMayRest = false
 
     public init() {}
 
     public func set(_ on: Bool) {
         guard on != isOn else { return }
         if on {
-            let result = IOPMAssertionCreateWithName(
-                kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
-                IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                Strings.assertionName as CFString,
-                &id
-            )
-            isOn = result == kIOReturnSuccess
+            isOn = take()
         } else {
             IOPMAssertionRelease(id)
             isOn = false
         }
+    }
+
+    /// Swaps the hold for one of the other kind; the Mac is kept awake throughout.
+    public func setDisplayMayRest(_ rest: Bool) {
+        guard rest != displayMayRest else { return }
+        displayMayRest = rest
+        guard isOn else { return }
+        let previous = id
+        isOn = take()
+        IOPMAssertionRelease(previous)
+    }
+
+    /// Keeps the Mac and its display awake for a minute after Vigil quits to install an update,
+    /// until the new version takes its own hold. `caffeinate` outlives the app.
+    public static func bridgeRestart() {
+        let bridge = Process()
+        bridge.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
+        bridge.arguments = ["-di", "-t", "60"]
+        bridge.standardInput = FileHandle.nullDevice
+        bridge.standardOutput = FileHandle.nullDevice
+        bridge.standardError = FileHandle.nullDevice
+        try? bridge.run()
+    }
+
+    private func take() -> Bool {
+        let type =
+            displayMayRest
+            ? kIOPMAssertionTypePreventUserIdleSystemSleep : kIOPMAssertionTypePreventUserIdleDisplaySleep
+        return IOPMAssertionCreateWithName(
+            type as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn), Strings.assertionName as CFString, &id
+        ) == kIOReturnSuccess
+    }
+}
+
+/// What a closed lid means for the built-in display while lid-closed mode is on. With sleep
+/// disabled, closing the lid no longer turns the display off: it would stay lit behind the lid.
+public enum ClosedLid {
+    /// Vigil turns the displays off and lets them rest, unless another display is in use: with
+    /// the lid closed and a monitor attached, the monitor is the screen.
+    public static func displayOff(lidMode: Bool, lidClosed: Bool, externalDisplay: Bool) -> Bool {
+        lidMode && lidClosed && !externalDisplay
+    }
+}
+
+/// Tells when the lid opens or closes. On a Mac without a lid it never calls back.
+@MainActor
+public final class LidSensor {
+    private var port: IONotificationPortRef?
+    private var notification = io_object_t(0)
+    private let changed: @MainActor () -> Void
+
+    /// `kIOPMMessageClamshellStateChange`, a macro Swift does not import.
+    nonisolated static let clamshellChanged: UInt32 = 0xE003_4100
+
+    public init(changed: @escaping @MainActor () -> Void) {
+        self.changed = changed
+    }
+
+    /// Whether the lid is closed right now; false on a Mac without one.
+    nonisolated public static func isClosed() -> Bool {
+        let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard root != 0 else { return false }
+        defer { IOObjectRelease(root) }
+        let value = IORegistryEntryCreateCFProperty(root, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)
+        return value?.takeRetainedValue() as? Bool ?? false
+    }
+
+    /// Starts listening; the callback runs on the main queue.
+    public func start() {
+        guard port == nil else { return }
+        let root = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPMrootDomain"))
+        guard root != 0 else { return }
+        defer { IOObjectRelease(root) }
+        guard let newPort = IONotificationPortCreate(kIOMainPortDefault) else { return }
+        IONotificationPortSetDispatchQueue(newPort, .main)
+        let result = IOServiceAddInterestNotification(
+            newPort, root, kIOGeneralInterest,
+            { context, _, message, _ in
+                guard message == LidSensor.clamshellChanged, let context else { return }
+                MainActor.assumeIsolated {
+                    Unmanaged<LidSensor>.fromOpaque(context).takeUnretainedValue().changed()
+                }
+            }, Unmanaged.passUnretained(self).toOpaque(), &notification)
+        if result == KERN_SUCCESS {
+            port = newPort
+        } else {
+            IONotificationPortDestroy(newPort)
+        }
+    }
+
+    public func stop() {
+        guard let port else { return }
+        IOObjectRelease(notification)
+        IONotificationPortDestroy(port)
+        notification = 0
+        self.port = nil
+    }
+}
+
+public enum Display {
+    /// Turns the displays off now, as a hot corner does. Needs no administrator rights; a key
+    /// press or opening the lid turns them on again.
+    public static func sleepNow() {
+        run(LidMode.pmset, ["displaysleepnow"])
+    }
+
+    /// Whether a display other than the built-in one is connected, awake or not.
+    public static func hasExternal() -> Bool {
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return false }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &displays, &count) == .success else { return false }
+        return displays.prefix(Int(count)).contains { CGDisplayIsBuiltin($0) == 0 }
     }
 }
 
