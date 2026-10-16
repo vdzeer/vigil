@@ -1,5 +1,11 @@
 # Vigil
 
+[![Latest release](https://img.shields.io/github/v/release/vdzeer/vigil)](https://github.com/vdzeer/vigil/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/vdzeer/vigil/total)](https://github.com/vdzeer/vigil/releases)
+[![CI](https://github.com/vdzeer/vigil/actions/workflows/ci.yml/badge.svg)](https://github.com/vdzeer/vigil/actions/workflows/ci.yml)
+[![macOS 13+](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)](https://github.com/vdzeer/vigil#install)
+[![License: MIT](https://img.shields.io/github/license/vdzeer/vigil)](https://github.com/vdzeer/vigil/blob/main/LICENSE)
+
 Vigil is a small menu bar app that keeps your Mac awake. One click stops the display from
 sleeping and the Mac from idling to sleep, the way Caffeine does. A second switch lets the Mac
 keep running with its lid closed, for example while a long build or a download finishes.
