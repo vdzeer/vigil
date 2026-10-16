@@ -71,9 +71,11 @@ if pgrep -xq "$NAME"; then
   for _ in {1..50}; do pgrep -xq "$NAME" || break; sleep 0.1; done
 fi
 
+# Moved, not copied: macOS lists every app bundle it finds, so a copy left in build/ would show
+# up in Spotlight and the app list as a second Vigil.
 mkdir -p "$HOME/Applications"
 rm -rf "$DEST"
-cp -R "$APP" "$DEST"
+mv "$APP" "$DEST"
 echo "Installed: $DEST"
 
 if [[ "$MODE" != "--no-start" ]]; then

@@ -93,6 +93,9 @@ FEED
 # The feed itself is signed too (SURequireSignedFeed): sign_update embeds the signature in it.
 "$SPARKLE_BIN/sign_update" build/appcast.xml
 
+# The app is in the disk image now; a loose copy in build/ would show up as a second Vigil.
+rm -rf "$APP"
+
 echo "Release: $ROOT/$DMG and $ROOT/build/appcast.xml"
 echo "Publish: gh release create v$VERSION $DMG build/appcast.xml"
 shasum -a 256 "$DMG"
